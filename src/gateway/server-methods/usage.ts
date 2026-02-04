@@ -1,10 +1,6 @@
 import fs from "node:fs";
 import type { SessionEntry, SessionSystemPromptReport } from "../../config/sessions/types.js";
-import type {
-  CostUsageSummary,
-  SessionCostSummary,
-  SessionUsageTimeSeries,
-} from "../../infra/session-cost-usage.js";
+import type { CostUsageSummary, SessionCostSummary } from "../../infra/session-cost-usage.js";
 import type { GatewayRequestHandlers } from "./types.js";
 import { loadConfig } from "../../config/config.js";
 import { resolveSessionFilePath } from "../../config/sessions/paths.js";
@@ -36,7 +32,7 @@ type CostUsageCacheEntry = {
 const costUsageCache = new Map<string, CostUsageCacheEntry>();
 
 /**
- * Parse a date string (YYYY-MM-DD) to start of day timestamp in local timezone.
+ * Parse a date string (YYYY-MM-DD) to start of day timestamp in UTC.
  * Returns undefined if invalid.
  */
 const parseDateToMs = (raw: unknown): number | undefined => {
@@ -56,11 +52,28 @@ const parseDateToMs = (raw: unknown): number | undefined => {
   return ms;
 };
 
+const parseDays = (raw: unknown): number | undefined => {
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return Math.floor(raw);
+  }
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed);
+    }
+  }
+  return undefined;
+};
+
 /**
- * Get date range from params (startDate/endDate strings).
+ * Get date range from params (startDate/endDate or days).
  * Falls back to last 30 days if not provided.
  */
-const parseDateRange = (params: { startDate?: unknown; endDate?: unknown }): DateRange => {
+const parseDateRange = (params: {
+  startDate?: unknown;
+  endDate?: unknown;
+  days?: unknown;
+}): DateRange => {
   const now = new Date();
   // Use UTC for consistent date handling
   const todayStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
@@ -72,6 +85,13 @@ const parseDateRange = (params: { startDate?: unknown; endDate?: unknown }): Dat
   if (startMs !== undefined && endMs !== undefined) {
     // endMs should be end of day
     return { startMs, endMs: endMs + 24 * 60 * 60 * 1000 - 1 };
+  }
+
+  const days = parseDays(params.days);
+  if (days !== undefined) {
+    const clampedDays = Math.max(1, days);
+    const start = todayStartMs - (clampedDays - 1) * 24 * 60 * 60 * 1000;
+    return { startMs: start, endMs: todayEndMs };
   }
 
   // Default to last 30 days
@@ -158,6 +178,7 @@ export const usageHandlers: GatewayRequestHandlers = {
     const { startMs, endMs } = parseDateRange({
       startDate: params?.startDate,
       endDate: params?.endDate,
+      days: params?.days,
     });
     const summary = await loadCostUsageSummaryCached({ startMs, endMs, config });
     respond(true, summary, undefined);
@@ -327,7 +348,7 @@ export const usageHandlers: GatewayRequestHandlers = {
     // Format dates back to YYYY-MM-DD strings
     const formatDateStr = (ms: number) => {
       const d = new Date(ms);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
     };
 
     const result: SessionsUsageResult = {

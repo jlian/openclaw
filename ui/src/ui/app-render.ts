@@ -57,7 +57,9 @@ import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./na
 // Module-scope debounce for usage date changes (avoids type-unsafe hacks on state object)
 let usageDateDebounceTimeout: number | null = null;
 const debouncedLoadUsage = (state: UsageState) => {
-  if (usageDateDebounceTimeout) clearTimeout(usageDateDebounceTimeout);
+  if (usageDateDebounceTimeout) {
+    clearTimeout(usageDateDebounceTimeout);
+  }
   usageDateDebounceTimeout = window.setTimeout(() => void loadUsage(state), 400);
 };
 import { renderAgents } from "./views/agents.ts";
@@ -352,15 +354,17 @@ export function renderApp(state: AppViewState) {
                     // Shift-click: select range from last selected to this session
                     // Sort sessions same way as displayed (by tokens or cost descending)
                     const isTokenMode = state.usageChartMode === "tokens";
-                    const sortedSessions = [...(state.usageResult?.sessions ?? [])].sort((a, b) => {
-                      const valA = isTokenMode
-                        ? (a.usage?.totalTokens ?? 0)
-                        : (a.usage?.totalCost ?? 0);
-                      const valB = isTokenMode
-                        ? (b.usage?.totalTokens ?? 0)
-                        : (b.usage?.totalCost ?? 0);
-                      return valB - valA;
-                    });
+                    const sortedSessions = [...(state.usageResult?.sessions ?? [])].toSorted(
+                      (a, b) => {
+                        const valA = isTokenMode
+                          ? (a.usage?.totalTokens ?? 0)
+                          : (a.usage?.totalCost ?? 0);
+                        const valB = isTokenMode
+                          ? (b.usage?.totalTokens ?? 0)
+                          : (b.usage?.totalCost ?? 0);
+                        return valB - valA;
+                      },
+                    );
                     const allKeys = sortedSessions.map((s) => s.key);
                     const lastSelected =
                       state.usageSelectedSessions[state.usageSelectedSessions.length - 1];

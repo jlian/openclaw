@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
-import { loadCostUsageSummary, loadSessionCostSummary } from "./session-cost-usage.js";
+import {
+  discoverAllSessions,
+  loadCostUsageSummary,
+  loadSessionCostSummary,
+} from "./session-cost-usage.js";
 
 describe("session cost usage", () => {
   it("aggregates daily totals with log cost and pricing fallback", async () => {
@@ -139,5 +143,33 @@ describe("session cost usage", () => {
     expect(summary?.totalCost).toBeCloseTo(0.03, 5);
     expect(summary?.totalTokens).toBe(30);
     expect(summary?.lastActivity).toBeGreaterThan(0);
+  });
+
+  it("does not exclude sessions with mtime after endMs during discovery", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-discover-"));
+    const sessionsDir = path.join(root, "agents", "main", "sessions");
+    await fs.mkdir(sessionsDir, { recursive: true });
+    const sessionFile = path.join(sessionsDir, "sess-late.jsonl");
+    await fs.writeFile(sessionFile, "", "utf-8");
+
+    const now = Date.now();
+    await fs.utimes(sessionFile, now / 1000, now / 1000);
+
+    const originalState = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = root;
+    try {
+      const sessions = await discoverAllSessions({
+        startMs: now - 7 * 24 * 60 * 60 * 1000,
+        endMs: now - 24 * 60 * 60 * 1000,
+      });
+      expect(sessions.length).toBe(1);
+      expect(sessions[0]?.sessionId).toBe("sess-late");
+    } finally {
+      if (originalState === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = originalState;
+      }
+    }
   });
 });
