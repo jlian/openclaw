@@ -9,6 +9,7 @@ import type { MSTeamsConversationStore } from "./conversation-store.js";
 import type { MSTeamsAdapter } from "./messenger.js";
 import { createMSTeamsConversationStoreFs } from "./conversation-store-fs.js";
 import { formatUnknownError } from "./errors.js";
+import { createMessageHistoryStoreFs } from "./message-history-store-fs.js";
 import { registerMSTeamsHandlers } from "./monitor-handler.js";
 import { createMSTeamsPollStoreFs, type MSTeamsPollStore } from "./polls.js";
 import {
@@ -210,6 +211,7 @@ export async function monitorMSTeamsProvider(
       ? Math.floor(agentDefaults.mediaMaxMb * MB)
       : 8 * MB;
   const conversationStore = opts.conversationStore ?? createMSTeamsConversationStoreFs();
+  const messageHistoryStore = createMessageHistoryStoreFs();
   const pollStore = opts.pollStore ?? createMSTeamsPollStoreFs();
 
   log.info(`starting provider (port ${port})`);
@@ -233,6 +235,7 @@ export async function monitorMSTeamsProvider(
     textLimit,
     mediaMaxBytes,
     conversationStore,
+    messageHistoryStore,
     pollStore,
     log,
   });

@@ -31,6 +31,7 @@ export type MSTeamsMessageHandlerDeps = {
   textLimit: number;
   mediaMaxBytes: number;
   conversationStore: MSTeamsConversationStore;
+  messageHistoryStore: MessageHistoryStore;
   pollStore: MSTeamsPollStore;
   log: MSTeamsMonitorLogger;
 };

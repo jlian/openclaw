@@ -603,9 +603,16 @@ OpenClaw sends Teams polls as Adaptive Cards (there is no native Teams poll API)
 
 ## Reading message history
 
-The agent can read recent messages from Teams conversations via the Graph API using the `read` action on the `message` tool.
+The agent can read recent messages from Teams conversations using the `read` action on the `message` tool. Messages come from two sources:
 
-### Requirements
+1. **Local history store** (primary) — the gateway automatically captures inbound and outbound messages as they flow through the Bot Framework webhook. Stored as JSON files in `~/.openclaw/msteams-history-*.json` with 12-month retention and auto-pruning. Attachment URLs (images, files) are preserved.
+2. **Graph API** (fallback) — if the local store is empty (e.g., messages from before the feature was enabled), it falls through to the Microsoft Graph API (requires additional permissions and admin consent).
+
+The local store requires no extra Graph API permissions and works out of the box for all conversations the bot has participated in.
+
+### Graph API fallback requirements
+
+If you need the Graph API fallback (e.g., to read older messages not in the local store):
 
 - **Graph API permissions** with admin consent (see [Graph-enabled media + history](#graph-enabled-media--history-required-for-channels)):
   - `ChannelMessage.Read.All` for channel messages
@@ -636,6 +643,7 @@ The agent can read recent messages from Teams conversations via the Graph API us
 | `to`      | string | Target conversation (e.g. `conversation:19:...@thread.tacv2` or `user:<id>`) |
 | `limit`   | number | Max messages to return (1-50, default 20)                                    |
 | `cursor`  | string | Opaque pagination cursor from a previous `nextCursor` response               |
+| `source`  | string | Force a specific source: `local` or `graph` (default: auto, local first)     |
 
 ### Example
 
@@ -648,7 +656,7 @@ The agent can read recent messages from Teams conversations via the Graph API us
 }
 ```
 
-The response includes a `messages` array and an optional `nextCursor` for pagination.
+The response includes a `messages` array, an optional `nextCursor` for pagination, and a `source` field (`"local"` or `"graph"`) indicating where the messages came from.
 
 ## Adaptive Cards (arbitrary)
 

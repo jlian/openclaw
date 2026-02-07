@@ -40,6 +40,8 @@ export function createMSTeamsReplyDispatcher(params: {
   tokenProvider?: MSTeamsAccessTokenProvider;
   /** SharePoint site ID for file uploads in group chats/channels */
   sharePointSiteId?: string;
+  /** Called after outbound messages are sent, for local history capture. */
+  onOutboundMessages?: (messages: { id: string; text: string }[]) => void;
 }) {
   const core = getMSTeamsRuntime();
   const sendTypingIndicator = async () => {
@@ -105,6 +107,13 @@ export function createMSTeamsReplyDispatcher(params: {
         });
         if (ids.length > 0) {
           params.onSentMessageIds?.(ids);
+          if (params.onOutboundMessages) {
+            const outbound = ids.map((id, i) => ({
+              id,
+              text: messages[i]?.text ?? "",
+            }));
+            params.onOutboundMessages(outbound);
+          }
         }
       },
       onError: (err, info) => {

@@ -30,12 +30,20 @@ export type GraphChatMessage = {
 };
 
 /** Normalized message returned to the agent. */
+export type NormalizedTeamsMessageAttachment = {
+  contentType?: string;
+  contentUrl?: string;
+  name?: string;
+  thumbnailUrl?: string;
+};
+
 export type NormalizedTeamsMessage = {
   id: string;
   from: string;
   body: string;
   createdDateTime: string;
   messageType: string;
+  attachments?: NormalizedTeamsMessageAttachment[];
 };
 
 export type ReadMessagesResult = {

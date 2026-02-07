@@ -10,6 +10,7 @@ import {
 } from "openclaw/plugin-sdk";
 import { listMSTeamsDirectoryGroupsLive, listMSTeamsDirectoryPeersLive } from "./directory-live.js";
 import { readMSTeamsMessages } from "./graph-read.js";
+import { createMessageHistoryStoreFs } from "./message-history-store-fs.js";
 import { msteamsOnboardingAdapter } from "./onboarding.js";
 import { msteamsOutbound } from "./outbound.js";
 import { resolveMSTeamsGroupToolPolicy } from "./policy.js";
@@ -25,6 +26,42 @@ import {
 import { resolveGraphReadContext } from "./send-context.js";
 import { sendAdaptiveCardMSTeams, sendMessageMSTeams } from "./send.js";
 import { resolveMSTeamsCredentials } from "./token.js";
+
+/**
+ * Resolve a target string to a conversation ID for the local history store.
+ * Does not require Graph API — uses the conversation store for lookup.
+ */
+async function resolveConversationId(params: {
+  cfg: OpenClawConfig;
+  to: string;
+}): Promise<string | null> {
+  const { createMSTeamsConversationStoreFs: createStore } =
+    await import("./conversation-store-fs.js");
+  const store = createStore();
+  const trimmed = params.to.trim();
+
+  // conversation:ID or raw conversation ID
+  if (trimmed.startsWith("conversation:")) {
+    const id = trimmed.slice("conversation:".length).trim();
+    return id || null;
+  }
+
+  // user:aadObjectId — look up the conversation ID from the store
+  if (trimmed.startsWith("user:")) {
+    const userId = trimmed.slice("user:".length).trim();
+    const found = await store.findByUserId(userId);
+    return found?.conversationId ?? null;
+  }
+
+  // Looks like a conversation ID
+  if (trimmed.startsWith("19:") || trimmed.includes("@thread")) {
+    return trimmed;
+  }
+
+  // Try as user ID
+  const found = await store.findByUserId(trimmed);
+  return found?.conversationId ?? null;
+}
 
 type ResolvedMSTeamsAccount = {
   accountId: string;
@@ -435,7 +472,42 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
           integer: true,
         });
         const cursor = readStringParam(params, "cursor");
+        const source = readStringParam(params, "source");
 
+        // Try local message history store first (no Graph API needed).
+        // Falls back to Graph API when source=graph or local store is empty.
+        if (source !== "graph") {
+          try {
+            const historyStore = createMessageHistoryStoreFs();
+            const conversationId = await resolveConversationId({ cfg: ctx.cfg, to });
+            if (conversationId) {
+              const result = await historyStore.read(conversationId, {
+                limit: limit ?? undefined,
+                cursor: cursor ?? undefined,
+              });
+              if (result.messages.length > 0) {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: JSON.stringify({
+                        ok: true,
+                        channel: "msteams",
+                        source: "local",
+                        messages: result.messages,
+                        nextCursor: result.nextCursor ?? null,
+                      }),
+                    },
+                  ],
+                };
+              }
+            }
+          } catch {
+            // Local store unavailable — fall through to Graph API
+          }
+        }
+
+        // Graph API fallback (requires permissions + tenant consent)
         try {
           const readCtx = await resolveGraphReadContext({ cfg: ctx.cfg, to });
           const result = await readMSTeamsMessages({
@@ -451,6 +523,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
                 text: JSON.stringify({
                   ok: true,
                   channel: "msteams",
+                  source: "graph",
                   messages: result.messages,
                   nextCursor: result.nextCursor ?? null,
                 }),

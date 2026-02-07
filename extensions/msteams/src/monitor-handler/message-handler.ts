@@ -48,6 +48,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
     textLimit,
     mediaMaxBytes,
     conversationStore,
+    messageHistoryStore,
     pollStore,
     log,
   } = deps;
@@ -285,10 +286,6 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         : undefined;
     if (graphChatId) {
       log.debug("captured graph chat ID from channelData", { graphChatId });
-    } else if (conversationType === "personal" || conversationType === "groupChat") {
-      // channelData for personal chats usually only has {tenant:{id:...}}
-      const cd = activity.channelData;
-      log.debug(`no graphChatId in channelData keys=${cd ? Object.keys(cd).join(",") : "none"}`);
     }
     const conversationRef: StoredConversationReference = {
       activityId: activity.id,
@@ -311,6 +308,36 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
         error: formatUnknownError(err),
       });
     });
+
+    // Capture inbound message to local history store for readMessages.
+    // Fire-and-forget — never block inbound processing.
+    if (text || attachmentPlaceholder) {
+      const msgBody = text || attachmentPlaceholder;
+      const historyAttachments = attachments
+        .filter((a) => a.contentUrl || a.thumbnailUrl)
+        .map((a) => ({
+          contentType: a.contentType ?? undefined,
+          contentUrl: a.contentUrl ?? undefined,
+          name: a.name ?? undefined,
+          thumbnailUrl: a.thumbnailUrl ?? undefined,
+        }));
+      messageHistoryStore
+        .append(conversationId, {
+          id: activity.id ?? `${Date.now()}`,
+          from: senderName,
+          body: msgBody,
+          createdDateTime: activity.timestamp
+            ? new Date(activity.timestamp).toISOString()
+            : new Date().toISOString(),
+          messageType: "message",
+          ...(historyAttachments.length > 0 ? { attachments: historyAttachments } : {}),
+        })
+        .catch((err) => {
+          log.debug("failed to save message to history", {
+            error: formatUnknownError(err),
+          });
+        });
+    }
 
     const pollVote = extractMSTeamsPollVote(activity);
     if (pollVote) {
@@ -523,6 +550,23 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       },
       tokenProvider,
       sharePointSiteId,
+      onOutboundMessages: (msgs) => {
+        for (const msg of msgs) {
+          messageHistoryStore
+            .append(conversationId, {
+              id: msg.id,
+              from: "Bot",
+              body: msg.text,
+              createdDateTime: new Date().toISOString(),
+              messageType: "message",
+            })
+            .catch((err) => {
+              log.debug("failed to save outbound message to history", {
+                error: formatUnknownError(err),
+              });
+            });
+        }
+      },
     });
 
     log.info("dispatching to agent", { sessionKey: route.sessionKey });
