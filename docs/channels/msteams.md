@@ -601,6 +601,63 @@ OpenClaw sends Teams polls as Adaptive Cards (there is no native Teams poll API)
 - The gateway must stay online to record votes.
 - Polls do not auto-post result summaries yet (inspect the store file if needed).
 
+## Reading message history
+
+The agent can read recent messages from Teams conversations using the `read` action on the `message` tool. Messages come from two sources:
+
+1. **Local history store** (primary) — the gateway automatically captures inbound and outbound messages as they flow through the Bot Framework webhook. Stored as JSON files in `~/.openclaw/msteams-history-*.json` with 12-month retention and auto-pruning. Attachment URLs (images, files) are preserved.
+2. **Graph API** (fallback) — if the local store is empty (e.g., messages from before the feature was enabled), it falls through to the Microsoft Graph API (requires additional permissions and admin consent).
+
+The local store requires no extra Graph API permissions and works out of the box for all conversations the bot has participated in.
+
+### Graph API fallback requirements
+
+If you need the Graph API fallback (e.g., to read older messages not in the local store):
+
+- **Graph API permissions** with admin consent (see [Graph-enabled media + history](#graph-enabled-media--history-required-for-channels)):
+  - `ChannelMessage.Read.All` for channel messages
+  - `Chat.Read.All` for DMs and group chats
+  - `TeamsAppInstallation.ReadForUser.All` (optional, improves chat ID resolution)
+- **Multi-tenant app registration:** if the bot's Azure AD app is registered on a
+  different tenant than the Teams users (common for SaaS/external bots), the app
+  must be configured as **multi-tenant** ("Accounts in any organizational directory")
+  in Azure AD, and an admin on the user's tenant must grant consent for the Graph
+  permissions. Without this, reading DMs/group chats will fail with a "missing
+  service principal" error.
+- The `messages` action gate must be enabled (it is by default). To disable:
+
+```json
+{
+  "channels": {
+    "msteams": {
+      "actions": { "messages": false }
+    }
+  }
+}
+```
+
+### Parameters
+
+| Parameter | Type   | Description                                                                  |
+| --------- | ------ | ---------------------------------------------------------------------------- |
+| `to`      | string | Target conversation (e.g. `conversation:19:...@thread.tacv2` or `user:<id>`) |
+| `limit`   | number | Max messages to return (1-50, default 20)                                    |
+| `cursor`  | string | Opaque pagination cursor from a previous `nextCursor` response               |
+| `source`  | string | Force a specific source: `local` or `graph` (default: auto, local first)     |
+
+### Example
+
+```json
+{
+  "action": "read",
+  "channel": "msteams",
+  "to": "conversation:19:abc@thread.tacv2",
+  "limit": 10
+}
+```
+
+The response includes a `messages` array, an optional `nextCursor` for pagination, and a `source` field (`"local"` or `"graph"`) indicating where the messages came from.
+
 ## Adaptive Cards (arbitrary)
 
 Send any Adaptive Card JSON to Teams users or conversations using the `message` tool or CLI.

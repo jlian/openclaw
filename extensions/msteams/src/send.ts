@@ -14,6 +14,7 @@ import {
   uploadAndShareSharePoint,
 } from "./graph-upload.js";
 import { extractFilename, extractMessageId } from "./media-helpers.js";
+import { createMessageHistoryStoreFs } from "./message-history-store-fs.js";
 import { buildConversationReference, sendMSTeamsMessages } from "./messenger.js";
 import { buildMSTeamsPollCard } from "./polls.js";
 import { getMSTeamsRuntime } from "./runtime.js";
@@ -45,6 +46,26 @@ const FILE_CONSENT_THRESHOLD_BYTES = 4 * 1024 * 1024; // 4MB
  * Higher than the default because OneDrive upload handles large files well.
  */
 const MSTEAMS_MAX_MEDIA_BYTES = 100 * 1024 * 1024;
+
+/** Lazy-initialized singleton history store for proactive sends. */
+let _historyStore: ReturnType<typeof createMessageHistoryStoreFs> | undefined;
+function getHistoryStore() {
+  _historyStore ??= createMessageHistoryStoreFs();
+  return _historyStore;
+}
+
+/** Fire-and-forget: capture an outbound message in the local history store. */
+function captureOutbound(conversationId: string, messageId: string, text: string) {
+  getHistoryStore()
+    .append(conversationId, {
+      id: messageId,
+      from: "Bot",
+      body: text,
+      createdDateTime: new Date().toISOString(),
+      messageType: "message",
+    })
+    .catch(() => {});
+}
 
 export type SendMSTeamsPollParams = {
   /** Full config (for credentials) */
@@ -177,6 +198,7 @@ export async function sendMessageMSTeams(
       }
 
       log.info("sent file consent card", { conversationId, messageId, uploadId });
+      captureOutbound(conversationId, messageId, messageText || `[file: ${fileName}]`);
 
       return {
         messageId,
@@ -260,6 +282,7 @@ export async function sendMessageMSTeams(
           messageId,
           fileName: driveItem.name,
         });
+        captureOutbound(conversationId, messageId, messageText || `[file: ${driveItem.name}]`);
 
         return { messageId, conversationId };
       }
@@ -303,6 +326,7 @@ export async function sendMessageMSTeams(
         messageId,
         shareUrl: uploaded.shareUrl,
       });
+      captureOutbound(conversationId, messageId, String(activity.text ?? ""));
 
       return { messageId, conversationId };
     } catch (err) {
@@ -367,6 +391,7 @@ async function sendTextWithMedia(
 
   const messageId = messageIds[0] ?? "unknown";
   log.info("sent proactive message", { conversationId, messageId });
+  captureOutbound(conversationId, messageId, text ?? "");
 
   return {
     messageId,
@@ -432,6 +457,7 @@ export async function sendPollMSTeams(
   }
 
   log.info("sent poll", { conversationId, pollId: pollCard.pollId, messageId });
+  captureOutbound(conversationId, messageId, `[poll: ${params.question}]`);
 
   return {
     pollId: pollCard.pollId,
@@ -492,6 +518,7 @@ export async function sendAdaptiveCardMSTeams(
   }
 
   log.info("sent adaptive card", { conversationId, messageId });
+  captureOutbound(conversationId, messageId, "[adaptive card]");
 
   return {
     messageId,

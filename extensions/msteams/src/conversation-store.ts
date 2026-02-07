@@ -25,6 +25,10 @@ export type StoredConversationReference = {
   serviceUrl?: string;
   /** Locale */
   locale?: string;
+  /** Graph API chat ID (19:...@unq.gbl.spaces) for personal/group chats.
+   *  Bot Framework conversation IDs (a:...) differ from Graph chat IDs;
+   *  this field caches the resolved Graph ID for readMessages. */
+  graphChatId?: string;
 };
 
 export type MSTeamsConversationStoreEntry = {

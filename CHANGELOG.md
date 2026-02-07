@@ -18,6 +18,7 @@ Docs: https://docs.openclaw.ai
 
 ### Added
 
+- MSTeams: add `readMessages` action — local message history store captures inbound and outbound messages via Bot Framework webhook, with Graph API fallback. Supports 12-month retention, 200K message cap, out-of-order sort, attachment URL preservation, and paginated newest-first reads. (#11346)
 - Cron: run history deep-links to session chat from the dashboard. (#10776) Thanks @tyler6204.
 - Cron: per-run session keys in run log entries and default labels for cron sessions. (#10776) Thanks @tyler6204.
 - Cron: legacy payload field compatibility (`deliver`, `channel`, `to`, `bestEffortDeliver`) in schema. (#10776) Thanks @tyler6204.

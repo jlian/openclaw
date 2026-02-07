@@ -1,11 +1,16 @@
 import type { ChannelMessageActionName, ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk";
 import {
   buildChannelConfigSchema,
+  createActionGate,
   DEFAULT_ACCOUNT_ID,
   MSTeamsConfigSchema,
   PAIRING_APPROVED_MESSAGE,
+  readNumberParam,
+  readStringParam,
 } from "openclaw/plugin-sdk";
 import { listMSTeamsDirectoryGroupsLive, listMSTeamsDirectoryPeersLive } from "./directory-live.js";
+import { readMSTeamsMessages } from "./graph-read.js";
+import { createMessageHistoryStoreFs } from "./message-history-store-fs.js";
 import { msteamsOnboardingAdapter } from "./onboarding.js";
 import { msteamsOutbound } from "./outbound.js";
 import { resolveMSTeamsGroupToolPolicy } from "./policy.js";
@@ -18,8 +23,45 @@ import {
   resolveMSTeamsChannelAllowlist,
   resolveMSTeamsUserAllowlist,
 } from "./resolve-allowlist.js";
+import { resolveGraphReadContext } from "./send-context.js";
 import { sendAdaptiveCardMSTeams, sendMessageMSTeams } from "./send.js";
 import { resolveMSTeamsCredentials } from "./token.js";
+
+/**
+ * Resolve a target string to a conversation ID for the local history store.
+ * Does not require Graph API — uses the conversation store for lookup.
+ */
+async function resolveConversationId(params: {
+  cfg: OpenClawConfig;
+  to: string;
+}): Promise<string | null> {
+  const { createMSTeamsConversationStoreFs: createStore } =
+    await import("./conversation-store-fs.js");
+  const store = createStore();
+  const trimmed = params.to.trim();
+
+  // conversation:ID or raw conversation ID
+  if (trimmed.startsWith("conversation:")) {
+    const id = trimmed.slice("conversation:".length).trim();
+    return id || null;
+  }
+
+  // user:aadObjectId — look up the conversation ID from the store
+  if (trimmed.startsWith("user:")) {
+    const userId = trimmed.slice("user:".length).trim();
+    const found = await store.findByUserId(userId);
+    return found?.conversationId ?? null;
+  }
+
+  // Looks like a conversation ID
+  if (trimmed.startsWith("19:") || trimmed.includes("@thread")) {
+    return trimmed;
+  }
+
+  // Try as user ID
+  const found = await store.findByUserId(trimmed);
+  return found?.conversationId ?? null;
+}
 
 type ResolvedMSTeamsAccount = {
   accountId: string;
@@ -363,7 +405,13 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
       if (!enabled) {
         return [];
       }
-      return ["poll"] satisfies ChannelMessageActionName[];
+      const msteamsCfg = cfg.channels?.msteams;
+      const gate = createActionGate(msteamsCfg?.actions as Record<string, boolean | undefined>);
+      const actions: ChannelMessageActionName[] = ["poll"];
+      if (gate("messages")) {
+        actions.push("read");
+      }
+      return actions;
     },
     supportsCards: ({ cfg }) => {
       return (
@@ -406,6 +454,95 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
           ],
         };
       }
+      if (ctx.action === "read") {
+        const { params } = ctx;
+        const to =
+          typeof params.to === "string"
+            ? params.to.trim()
+            : typeof params.target === "string"
+              ? params.target.trim()
+              : "";
+        if (!to) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: "readMessages requires a target conversation (to)." }],
+          };
+        }
+        const limit = readNumberParam(params, "limit", {
+          integer: true,
+        });
+        const cursor = readStringParam(params, "cursor");
+        const source = readStringParam(params, "source");
+
+        // Try local message history store first (no Graph API needed).
+        // Falls back to Graph API when source=graph or local store is empty.
+        if (source !== "graph") {
+          try {
+            const historyStore = createMessageHistoryStoreFs();
+            const conversationId = await resolveConversationId({ cfg: ctx.cfg, to });
+            if (conversationId) {
+              const result = await historyStore.read(conversationId, {
+                limit: limit ?? undefined,
+                cursor: cursor ?? undefined,
+              });
+              if (result.messages.length > 0) {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: JSON.stringify({
+                        ok: true,
+                        channel: "msteams",
+                        source: "local",
+                        messages: result.messages,
+                        nextCursor: result.nextCursor ?? null,
+                      }),
+                    },
+                  ],
+                };
+              }
+            }
+          } catch {
+            // Local store unavailable — fall through to Graph API
+          }
+        }
+
+        // Graph API fallback (requires permissions + tenant consent)
+        try {
+          const readCtx = await resolveGraphReadContext({ cfg: ctx.cfg, to });
+          const result = await readMSTeamsMessages({
+            tokenProvider: readCtx.tokenProvider,
+            target: readCtx.target,
+            limit: limit ?? undefined,
+            cursor: cursor ?? undefined,
+          });
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: true,
+                  channel: "msteams",
+                  source: "graph",
+                  messages: result.messages,
+                  nextCursor: result.nextCursor ?? null,
+                }),
+              },
+            ],
+          };
+        } catch (err) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `Failed to read messages: ${err instanceof Error ? err.message : String(err)}`,
+              },
+            ],
+          };
+        }
+      }
+
       // Return null to fall through to default handler
       return null as never;
     },
