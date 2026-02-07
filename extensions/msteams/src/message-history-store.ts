@@ -13,8 +13,8 @@ import type { NormalizedTeamsMessage } from "./graph-read.js";
 /** Default retention: 12 months. */
 export const DEFAULT_HISTORY_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 
-/** Default max messages per conversation. At ~300 bytes/msg, 500 ≈ 150 KB. */
-export const DEFAULT_MAX_MESSAGES = 500;
+/** Default max messages per conversation. At ~300 bytes/msg, 10 000 ≈ 3 MB. */
+export const DEFAULT_MAX_MESSAGES = 10_000;
 
 export type MessageHistoryStoreData = {
   version: 1;

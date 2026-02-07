@@ -92,6 +92,11 @@ export function createMessageHistoryStoreFs(params?: {
         return;
       }
       store.messages.push(message);
+      // Maintain chronological order (usually a no-op for live messages)
+      const last = store.messages.at(-2);
+      if (last && message.createdDateTime < last.createdDateTime) {
+        store.messages.sort((a, b) => a.createdDateTime.localeCompare(b.createdDateTime));
+      }
       store.messages = prune(store.messages);
       await writeJsonFile(filePath, store);
     });

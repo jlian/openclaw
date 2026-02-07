@@ -167,4 +167,18 @@ describe("createMessageHistoryStoreFs", () => {
     expect(result.messages).toHaveLength(0);
     expect(result.nextCursor).toBeUndefined();
   });
+
+  it("sorts out-of-order appends chronologically", async () => {
+    const stateDir = createTmpDir();
+    const store = createMessageHistoryStoreFs({ stateDir });
+
+    // Append messages out of chronological order
+    await store.append("conv-1", makeMsg("3", "third", "Alice", "2026-02-01T12:00:00Z"));
+    await store.append("conv-1", makeMsg("1", "first", "Bob", "2026-02-01T10:00:00Z"));
+    await store.append("conv-1", makeMsg("2", "second", "Alice", "2026-02-01T11:00:00Z"));
+
+    const result = await store.read("conv-1");
+    // Read returns newest-first
+    expect(result.messages.map((m) => m.body)).toEqual(["third", "second", "first"]);
+  });
 });
