@@ -1,11 +1,15 @@
 import type { ChannelMessageActionName, ChannelPlugin, OpenClawConfig } from "openclaw/plugin-sdk";
 import {
   buildChannelConfigSchema,
+  createActionGate,
   DEFAULT_ACCOUNT_ID,
   MSTeamsConfigSchema,
   PAIRING_APPROVED_MESSAGE,
+  readNumberParam,
+  readStringParam,
 } from "openclaw/plugin-sdk";
 import { listMSTeamsDirectoryGroupsLive, listMSTeamsDirectoryPeersLive } from "./directory-live.js";
+import { readMSTeamsMessages } from "./graph-read.js";
 import { msteamsOnboardingAdapter } from "./onboarding.js";
 import { msteamsOutbound } from "./outbound.js";
 import { resolveMSTeamsGroupToolPolicy } from "./policy.js";
@@ -18,6 +22,7 @@ import {
   resolveMSTeamsChannelAllowlist,
   resolveMSTeamsUserAllowlist,
 } from "./resolve-allowlist.js";
+import { resolveGraphReadContext } from "./send-context.js";
 import { sendAdaptiveCardMSTeams, sendMessageMSTeams } from "./send.js";
 import { resolveMSTeamsCredentials } from "./token.js";
 
@@ -363,7 +368,13 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
       if (!enabled) {
         return [];
       }
-      return ["poll"] satisfies ChannelMessageActionName[];
+      const msteamsCfg = cfg.channels?.msteams;
+      const gate = createActionGate(msteamsCfg?.actions as Record<string, boolean | undefined>);
+      const actions: ChannelMessageActionName[] = ["poll"];
+      if (gate("messages")) {
+        actions.push("read");
+      }
+      return actions;
     },
     supportsCards: ({ cfg }) => {
       return (
@@ -406,6 +417,59 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
           ],
         };
       }
+      if (ctx.action === "read") {
+        const { params } = ctx;
+        const to =
+          typeof params.to === "string"
+            ? params.to.trim()
+            : typeof params.target === "string"
+              ? params.target.trim()
+              : "";
+        if (!to) {
+          return {
+            isError: true,
+            content: [{ type: "text", text: "readMessages requires a target conversation (to)." }],
+          };
+        }
+        const limit = readNumberParam(params, "limit", {
+          integer: true,
+        });
+        const cursor = readStringParam(params, "cursor");
+
+        try {
+          const readCtx = await resolveGraphReadContext({ cfg: ctx.cfg, to });
+          const result = await readMSTeamsMessages({
+            tokenProvider: readCtx.tokenProvider,
+            target: readCtx.target,
+            limit: limit ?? undefined,
+            cursor: cursor ?? undefined,
+          });
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: true,
+                  channel: "msteams",
+                  messages: result.messages,
+                  nextCursor: result.nextCursor ?? null,
+                }),
+              },
+            ],
+          };
+        } catch (err) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: `Failed to read messages: ${err instanceof Error ? err.message : String(err)}`,
+              },
+            ],
+          };
+        }
+      }
+
       // Return null to fall through to default handler
       return null as never;
     },

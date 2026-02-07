@@ -277,6 +277,19 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
 
     // Build conversation reference for proactive replies.
     const agent = activity.recipient;
+    // Teams may include the Graph chat ID in channelData for personal/group chats.
+    // This is different from the Bot Framework conversation ID (a:...).
+    const graphChatId =
+      typeof activity.channelData?.chatId === "string" && activity.channelData.chatId
+        ? activity.channelData.chatId
+        : undefined;
+    if (graphChatId) {
+      log.debug("captured graph chat ID from channelData", { graphChatId });
+    } else if (conversationType === "personal" || conversationType === "groupChat") {
+      // channelData for personal chats usually only has {tenant:{id:...}}
+      const cd = activity.channelData;
+      log.debug(`no graphChatId in channelData keys=${cd ? Object.keys(cd).join(",") : "none"}`);
+    }
     const conversationRef: StoredConversationReference = {
       activityId: activity.id,
       user: { id: from.id, name: from.name, aadObjectId: from.aadObjectId },
@@ -291,6 +304,7 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       channelId: activity.channelId,
       serviceUrl: activity.serviceUrl,
       locale: activity.locale,
+      graphChatId,
     };
     conversationStore.upsert(conversationId, conversationRef).catch((err) => {
       log.debug("failed to save conversation reference", {
