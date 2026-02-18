@@ -220,7 +220,9 @@ export function resolveMSTeamsReplyPolicy(params: {
   channelConfig?: MSTeamsChannelConfig;
 }): MSTeamsReplyPolicy {
   if (params.isDirectMessage) {
-    return { requireMention: false, replyStyle: "thread" };
+    // Use top-level (proactive) for DMs — "thread" uses the webhook turn context
+    // which gets revoked before block streaming replies can be delivered.
+    return { requireMention: false, replyStyle: "top-level" };
   }
 
   const requireMention =

@@ -274,12 +274,14 @@ export async function monitorMSTeamsProvider(
   });
 
   // Start listening and capture the HTTP server handle
-  const httpServer = expressApp.listen(port, () => {
-    log.info(`msteams provider started on port ${port}`);
-  });
-
-  httpServer.on("error", (err) => {
-    log.error("msteams server error", { error: String(err) });
+  const httpServer = await new Promise<ReturnType<typeof expressApp.listen>>((resolve, reject) => {
+    const server = expressApp.listen(port, () => {
+      log.info(`msteams provider started on port ${port}`);
+      resolve(server);
+    });
+    server.on("error", (err) => {
+      reject(err);
+    });
   });
 
   const shutdown = async () => {
@@ -294,12 +296,19 @@ export async function monitorMSTeamsProvider(
     });
   };
 
-  // Handle abort signal
-  if (opts.abortSignal) {
-    opts.abortSignal.addEventListener("abort", () => {
-      void shutdown();
-    });
-  }
+  // Block until abort signal (keeps the channel "alive" for the channel manager)
+  await new Promise<void>((resolve) => {
+    if (opts.abortSignal) {
+      if (opts.abortSignal.aborted) {
+        resolve();
+        return;
+      }
+      opts.abortSignal.addEventListener("abort", () => {
+        void shutdown().finally(resolve);
+      });
+    }
+    // If no abort signal, the promise stays pending (server runs forever)
+  });
 
   return { app: expressApp, shutdown };
 }
