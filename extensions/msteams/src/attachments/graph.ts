@@ -174,16 +174,41 @@ async function downloadGraphHostedContent(params: {
     return { media: [], status: hosted.status, count: 0 };
   }
 
+  const fetchFn = params.fetchFn ?? fetch;
   const out: MSTeamsInboundMedia[] = [];
   for (const item of hosted.items) {
+    let buffer: Buffer | undefined;
+    let headerMime: string | undefined;
+
+    // Fast path: use contentBytes when the collection response includes them.
     const contentBytes = typeof item.contentBytes === "string" ? item.contentBytes : "";
-    if (!contentBytes) {
-      continue;
+    if (contentBytes) {
+      try {
+        buffer = Buffer.from(contentBytes, "base64");
+      } catch {
+        // Fall through to $value fetch.
+      }
     }
-    let buffer: Buffer;
-    try {
-      buffer = Buffer.from(contentBytes, "base64");
-    } catch {
+
+    // Graph collection responses typically return contentBytes as null.
+    // Fetch the raw binary from the individual $value endpoint instead.
+    if (!buffer && item.id) {
+      try {
+        const valueUrl = `${params.messageUrl}/hostedContents/${encodeURIComponent(item.id)}/$value`;
+        const res = await fetchFn(valueUrl, {
+          headers: { Authorization: `Bearer ${params.accessToken}` },
+          redirect: "follow",
+        });
+        if (res.ok) {
+          buffer = Buffer.from(await res.arrayBuffer());
+          headerMime = res.headers.get("content-type") ?? undefined;
+        }
+      } catch {
+        // Network/fetch failure — skip this item.
+      }
+    }
+
+    if (!buffer) {
       continue;
     }
     if (buffer.byteLength > params.maxBytes) {
@@ -191,7 +216,7 @@ async function downloadGraphHostedContent(params: {
     }
     const mime = await getMSTeamsRuntime().media.detectMime({
       buffer,
-      headerMime: item.contentType ?? undefined,
+      headerMime: headerMime ?? item.contentType ?? undefined,
     });
     // Download any file type, not just images
     try {
