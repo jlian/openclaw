@@ -1,6 +1,7 @@
 import type { OpenClawConfig, RuntimeEnv } from "openclaw/plugin-sdk";
 import type { MSTeamsConversationStore } from "./conversation-store.js";
 import { buildFileInfoCard, parseFileConsentInvoke, uploadToConsentUrl } from "./file-consent.js";
+import type { MessageHistoryStore } from "./message-history-store.js";
 import type { MSTeamsAdapter } from "./messenger.js";
 import { createMSTeamsMessageHandler } from "./monitor-handler/message-handler.js";
 import type { MSTeamsMonitorLogger } from "./monitor-types.js";
@@ -31,6 +32,7 @@ export type MSTeamsMessageHandlerDeps = {
   textLimit: number;
   mediaMaxBytes: number;
   conversationStore: MSTeamsConversationStore;
+  messageHistoryStore: MessageHistoryStore;
   pollStore: MSTeamsPollStore;
   log: MSTeamsMonitorLogger;
 };

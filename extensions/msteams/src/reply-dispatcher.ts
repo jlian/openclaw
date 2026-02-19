@@ -36,6 +36,7 @@ export function createMSTeamsReplyDispatcher(params: {
   replyStyle: MSTeamsReplyStyle;
   textLimit: number;
   onSentMessageIds?: (ids: string[]) => void;
+  onSentMessages?: (messages: Array<{ id: string; text: string }>) => void;
   /** Token provider for OneDrive/SharePoint uploads in group chats/channels */
   tokenProvider?: MSTeamsAccessTokenProvider;
   /** SharePoint site ID for file uploads in group chats/channels */
@@ -105,6 +106,11 @@ export function createMSTeamsReplyDispatcher(params: {
         });
         if (ids.length > 0) {
           params.onSentMessageIds?.(ids);
+          if (params.onSentMessages) {
+            const texts = messages.map((m) => ("text" in m ? String(m.text ?? "") : ""));
+            const paired = ids.map((id, i) => ({ id, text: texts[i] ?? "" }));
+            params.onSentMessages(paired);
+          }
         }
       },
       onError: (err, info) => {

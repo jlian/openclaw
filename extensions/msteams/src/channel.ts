@@ -8,6 +8,7 @@ import {
   PAIRING_APPROVED_MESSAGE,
 } from "openclaw/plugin-sdk";
 import { listMSTeamsDirectoryGroupsLive, listMSTeamsDirectoryPeersLive } from "./directory-live.js";
+import { createMessageHistoryStoreFs } from "./message-history-store-fs.js";
 import { msteamsOnboardingAdapter } from "./onboarding.js";
 import { msteamsOutbound } from "./outbound.js";
 import { resolveMSTeamsGroupToolPolicy } from "./policy.js";
@@ -366,7 +367,7 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
       if (!enabled) {
         return [];
       }
-      return ["poll"] satisfies ChannelMessageActionName[];
+      return ["poll", "read"] satisfies ChannelMessageActionName[];
     },
     supportsCards: ({ cfg }) => {
       return (
@@ -375,6 +376,49 @@ export const msteamsPlugin: ChannelPlugin<ResolvedMSTeamsAccount> = {
       );
     },
     handleAction: async (ctx) => {
+      // Handle read action via local message history store
+      if (ctx.action === "read") {
+        const store = createMessageHistoryStoreFs();
+        const limit =
+          typeof ctx.params.limit === "number" ? Math.min(Math.max(1, ctx.params.limit), 50) : 20;
+        const readOpts = {
+          limit,
+          cursor: typeof ctx.params.cursor === "string" ? ctx.params.cursor : undefined,
+          before: typeof ctx.params.before === "string" ? ctx.params.before : undefined,
+          after: typeof ctx.params.after === "string" ? ctx.params.after : undefined,
+        };
+        // Try explicit channel param, then current context, then fall back to default store
+        const conversationId =
+          typeof ctx.params.channel === "string"
+            ? ctx.params.channel.trim()
+            : (ctx.toolContext?.currentChannelId ?? "");
+        const result = conversationId
+          ? await store.read(conversationId, readOpts)
+          : await store.readDefault(readOpts);
+        if (result.messages.length === 0 && conversationId) {
+          // Conversation ID may not match store key (e.g. user: vs a:), try default
+          const fallback = await store.readDefault(readOpts);
+          if (fallback.messages.length > 0) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({ ok: true, source: "local", ...fallback }),
+                },
+              ],
+            };
+          }
+        }
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({ ok: true, source: "local", ...result }),
+            },
+          ],
+        };
+      }
+
       // Handle send action with card parameter
       if (ctx.action === "send" && ctx.params.card) {
         const card = ctx.params.card as Record<string, unknown>;
