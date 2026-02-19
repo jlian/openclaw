@@ -690,15 +690,17 @@ describe("msteams attachments", () => {
 
     it("appends /views/original to Bot Framework attachment URLs", async () => {
       const bfUrl = "https://smba.trafficmanager.net/amer/72f988bf/v3/attachments/0-wus-d11-abc";
-      const media = await downloadAttachmentsWithFetch(
-        createContentUrlAttachments("image/*", bfUrl),
-        fetchRemoteMediaMock,
-        { allowHosts: ["smba.trafficmanager.net"], resolveFn: publicResolveFn },
+      const expectedUrl = `${bfUrl}/views/original`;
+      const fetchMock = vi.fn(async () => createBufferResponse(PNG_BUFFER, CONTENT_TYPE_IMAGE_PNG));
+      const media = await downloadMSTeamsAttachments(
+        buildDownloadParams(createContentUrlAttachments("image/*", bfUrl), {
+          allowHosts: ["smba.trafficmanager.net"],
+          resolveFn: publicResolveFn,
+          fetchFn: asFetchFn(fetchMock),
+        }),
       );
 
-      expect(fetchRemoteMediaMock).toHaveBeenCalledWith(
-        expect.objectContaining({ url: `${bfUrl}/views/original` }),
-      );
+      expect(fetchMock).toHaveBeenCalledWith(expectedUrl, expect.anything());
       expectAttachmentMediaLength(media, 1);
     });
   });
@@ -757,29 +759,9 @@ describe("msteams attachments", () => {
     });
 
     it("skips hosted content when $value fetch fails", async () => {
-      const tokenProvider = createTokenProvider();
-      const graphFetchMock = vi.fn(async (url: string) => {
-        if (url.endsWith("/hostedContents")) {
-          return createGraphCollectionResponse(
-            createHostedImageContents("1"),
-          );
-        }
-        if (url.includes("/hostedContents/1/$value")) {
-          return createNotFoundResponse();
-        }
-        if (url.endsWith("/attachments")) {
-          return createGraphCollectionResponse([]);
-        }
-        return createNotFoundResponse();
-      }) as unknown as FetchFn;
-
-      const { media } = await downloadGraphMediaWithMockOptions(
-        {},
-        {
-          fetchFn: graphFetchMock,
-          tokenProvider,
-        },
-      );
+      const { media } = await downloadGraphMediaWithMockOptions({
+        hostedContents: [{ id: "1", contentType: CONTENT_TYPE_IMAGE_PNG, contentBytes: null }],
+      });
 
       expectAttachmentMediaLength(media.media, 0);
       expect(saveMediaBufferMock).not.toHaveBeenCalled();
