@@ -381,10 +381,15 @@ export function createMSTeamsMessageHandler(deps: MSTeamsMessageHandlerDeps) {
       ? `Teams DM from ${senderName}`
       : `Teams message in ${conversationType} from ${senderName}`;
 
-    core.system.enqueueSystemEvent(`${inboundLabel}: ${preview}`, {
-      sessionKey: route.sessionKey,
-      contextKey: `msteams:message:${conversationId}:${activity.id ?? "unknown"}`,
-    });
+    // Skip system event for DMs — the full message is always delivered through
+    // the channel pipeline, so the system event is redundant and causes duplicate
+    // messages that interfere with queue modes (collect/followup/steer).
+    if (!isDirectMessage) {
+      core.system.enqueueSystemEvent(`${inboundLabel}: ${preview}`, {
+        sessionKey: route.sessionKey,
+        contextKey: `msteams:message:${conversationId}:${activity.id ?? "unknown"}`,
+      });
+    }
 
     const channelId = conversationId;
     const { teamConfig, channelConfig } = channelGate;
